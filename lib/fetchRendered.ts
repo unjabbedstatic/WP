@@ -1,61 +1,48 @@
 // lib/fetchRendered.ts
-import * as cheerio from "cheerio";
+const WP_BASE = process.env.WP_BASE ?? "https://unjabbed.app";
 
-const WP_BASE = process.env.WP_BASE || "https://unjabbed.app";
-const WP_HOST = new URL(WP_BASE).host;
+export type Rendered = {
+  headHtml: string;
+  bodyHtml: string;
+  bodyClass?: string;
+};
 
-export default async function fetchRendered(
-  pathname: string
-): Promise<{ bodyHtml: string }> {
-  const url = new URL(pathname || "/", WP_BASE).toString();
+/**
+ * Fetch a fully-rendered WordPress page and split out <head> and <body>.
+ */
+export default async function fetchRendered(pathname: string): Promise<Rendered> {
+  const path = pathname.startsWith("/") ? pathname : `/${pathname}`;
+  const url = new URL(path, WP_BASE).toString();
 
   const res = await fetch(url, {
     cache: "no-store",
-    headers: { "user-agent": "Vercel-Renderer" },
+    headers: {
+      // Helps WP serve normal HTML (not admin/REST/etc)
+      "user-agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36",
+    },
   });
-  if (!res.ok) throw new Error(`Fetch failed ${res.status} for ${url}`);
+
+  if (!res.ok) {
+    throw new Error(`Failed to fetch ${url}: ${res.status} ${res.statusText}`);
+  }
 
   const html = await res.text();
-  const $ = cheerio.load(html);
 
-  // Remove WP admin bar if present
-  $("#wpadminbar").remove();
+  // Grab <head>...</head>
+  const headMatch = html.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
+  const headHtml = headMatch?.[1] ?? "";
 
-  // Make asset URLs absolute to WP so CSS/JS/images load
-  $("[src]").each((_, el) => {
-    const src = $(el).attr("src");
-    if (src) $(el).attr("src", new URL(src, WP_BASE).toString());
-  });
-  $("link[href]").each((_, el) => {
-    const href = $(el).attr("href");
-    if (href) $(el).attr("href", new URL(href, WP_BASE).toString());
-  });
+  // Grab <body ...>...</body>
+  const bodyMatch = html.match(/<body([^>]*)>([\s\S]*?)<\/body>/i);
+  const bodyHtml = bodyMatch?.[2] ?? html;
 
-  // Keep internal page navigation on the Vercel domain
-  $("a[href]").each((_, el) => {
-    const raw = $(el).attr("href");
-    if (!raw) return;
-    let abs: URL;
-    try {
-      abs = new URL(raw, WP_BASE);
-    } catch {
-      return;
-    }
-    const isInternal =
-      abs.host === WP_HOST &&
-      !abs.pathname.match(/\.(pdf|jpe?g|png|gif|webp|svg|zip|mp4|mp3|css|js)$/i);
+  // Pull body class (useful but optional)
+  let bodyClass = "";
+  if (bodyMatch?.[1]) {
+    const cls = bodyMatch[1].match(/class=["']([^"']*)["']/i);
+    bodyClass = cls?.[1] ?? "";
+  }
 
-    if (isInternal) {
-      $(el).attr("href", abs.pathname + abs.search + abs.hash);
-    }
-  });
-
-  // Forms should still POST to WP
-  $("form[action]").each((_, el) => {
-    const action = $(el).attr("action");
-    if (action) $(el).attr("action", new URL(action, WP_BASE).toString());
-  });
-
-  const bodyHtml = $("body").html() ?? html;
-  return { bodyHtml };
+  return { headHtml, bodyHtml, bodyClass };
 }
