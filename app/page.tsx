@@ -1,4 +1,4 @@
-import { fetchRendered } from "@/lib/fetchRendered";
+import { fetchRendered } from "../lib/fetchRendered";
 
 export const dynamic = "force-static";
 
