@@ -6,38 +6,29 @@ const WP_BASE = process.env.WP_BASE || "https://unjabbed.app";
 export type Rendered = {
   head: string;
   body: string;
-  styles: string[]; // absolute stylesheet hrefs
+  styles: string[];
 };
 
 export default async function fetchRendered(pathname: string): Promise<Rendered> {
   const url = new URL(pathname, WP_BASE).toString();
-
-  const res = await fetch(url, {
-    cache: "no-store",
-    headers: { "User-Agent": "unjs-fetch/1.0 (+vercel)" },
-  });
+  const res = await fetch(url, { cache: "no-store", headers: { "User-Agent": "unjs-fetch/1.0 (+vercel)" } });
   if (!res.ok) throw new Error(`Failed to fetch ${url}: ${res.status} ${res.statusText}`);
 
   const html = await res.text();
   const $ = cheerio.load(html);
 
-  // Cleanups
   $("#wpadminbar").remove();
   $('link[rel="https://api.w.org/"]').remove();
 
-  // Make asset URLs absolute
   $('link[href], script[src], img[src]').each((_, el) => {
     const $el = $(el);
     const attr = $el.is("link, a") ? "href" : "src";
     const val = $el.attr(attr);
     if (!val) return;
     if (/^https?:\/\//i.test(val) || val.startsWith("//")) return;
-    try {
-      $el.attr(attr, new URL(val, WP_BASE).toString());
-    } catch {}
+    try { $el.attr(attr, new URL(val, WP_BASE).toString()); } catch {}
   });
 
-  // Rewrite internal anchor links to app-relative paths
   $('a[href]').each((_, el) => {
     const $a = $(el);
     const href = $a.attr("href");
@@ -50,7 +41,6 @@ export default async function fetchRendered(pathname: string): Promise<Rendered>
     } catch {}
   });
 
-  // Collect stylesheet URLs (absolute)
   const styles: string[] = [];
   $('link[rel="stylesheet"]').each((_, el) => {
     const href = $(el).attr("href");
