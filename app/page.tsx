@@ -1,4 +1,5 @@
-import { fetchRendered } from "../lib/fetchRendered";
+// app/page.tsx
+import fetchRendered from "../lib/fetchRendered";
 
 export const dynamic = "force-static";
 
