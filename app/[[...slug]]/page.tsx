@@ -2,15 +2,17 @@
 import fetchRendered from "../../lib/fetchRendered";
 
 export const dynamic = "force-static";
-export const revalidate = 3600; // rebuild this path at most once per hour
+export const revalidate = 3600;
 
-type Props = { params: { slug?: string[] } };
+type Props = {
+  params: { slug?: string[] };
+};
 
-export default async function CatchAll({ params }: Props) {
-  // Build the WP path: "/" for home, otherwise "/about", "/news/post", etc.
+export default async function CatchAllPage({ params }: Props) {
   const path =
     params.slug && params.slug.length > 0 ? `/${params.slug.join("/")}` : "/";
 
-  const html = await fetchRendered(path);
+  const { html } = await fetchRendered(path);
+
   return <main dangerouslySetInnerHTML={{ __html: html }} />;
 }
