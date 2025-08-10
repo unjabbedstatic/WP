@@ -7,7 +7,8 @@ export const revalidate = 3600;
 type Props = { params: { slug?: string[] } };
 
 export default async function CatchAll({ params }: Props) {
-  const path = "/" + (params.slug?.join("/") ?? "");
+  const path =
+    params.slug && params.slug.length ? `/${params.slug.join("/")}` : "/";
   const { bodyHtml } = await fetchRendered(path);
   return <main dangerouslySetInnerHTML={{ __html: bodyHtml }} />;
 }
