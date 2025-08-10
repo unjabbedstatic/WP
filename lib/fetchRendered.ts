@@ -2,79 +2,113 @@
 import { load } from "cheerio";
 
 const WP_BASE = process.env.WP_BASE || "https://unjabbed.app";
+const WP_HOST = new URL(WP_BASE).host;
 
-export default async function fetchRendered(pathname: string): Promise<{
-  head: string;
-  bodyClass: string;
-  html: string;
-  styles: string[];
-  scripts: string[]; // absolute <script src> URLs
-}> {
+type LinkAttrs = { [k: string]: string };
+
+export type Rendered = {
+  headLinks: LinkAttrs[];        // <link rel="stylesheet" ...>
+  headStyleTags: string[];       // contents of <style> tags
+  headScriptSrcs: string[];      // <script src> in <head>
+  headInlineScripts: string[];   // inline <script> in <head>
+
+  bodyHtml: string;              // inner HTML of <body>
+  bodyClass: string;             // class attribute of <body>
+  bodyScriptSrcs: string[];      // <script src> in <body>
+  bodyInlineScripts: string[];   // inline <script> in <body>
+};
+
+function abs(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try { return new URL(url, WP_BASE).toString(); } catch { return url; }
+}
+
+export default async function fetchRendered(pathname: string): Promise<Rendered> {
   const url = new URL(pathname || "/", WP_BASE).toString();
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`Failed to fetch ${url}: ${res.status} ${res.statusText}`);
+  const html = await res.text();
+  const $ = load(html);
 
-  const raw = await res.text();
-  const $ = load(raw);
-
+  // Remove admin bar if present
   $("#wpadminbar").remove();
 
-  const abs = (p: string) => new URL(p, WP_BASE).toString();
-
-  // Make assets absolute
-  $("link[href], script[src], img[src], source[src], video[src], audio[src], iframe[src]").each(
-    (_i, el) => {
-      const $el = $(el);
-      const attr = $el.is("link") ? "href" : "src";
-      const val = $el.attr(attr);
-      if (!val) return;
-      if (/^https?:\/\//i.test(val)) return;
-      $el.attr(attr, abs(val));
-    }
-  );
-
-  // Fix inline background-image urls
-  $("[style*='url(']").each((_i, el) => {
-    const s = $(el).attr("style");
-    if (!s) return;
-    const updated = s.replace(/url\((['"]?)([^'")]+)\1\)/g, (_m, _q, p) =>
-      /^https?:\/\//i.test(p) ? `url(${p})` : `url(${abs(p)})`
-    );
-    $(el).attr("style", updated);
+  // Fix lazy images and relative asset URLs
+  $("[data-src]").each((_, el) => {
+    const $el = $(el);
+    const ds = $el.attr("data-src");
+    if (ds) $el.attr("src", abs(ds)!);
+  });
+  $("[data-srcset]").each((_, el) => {
+    const $el = $(el);
+    const dss = $el.attr("data-srcset");
+    if (dss) $el.attr("srcset", dss); // leave as is; browser will parse absolute/relative pairs
   });
 
-  // Keep internal links inside the Vercel app
-  $("a[href]").each((_i, el) => {
+  // Make non-anchor asset URLs absolute (scripts, images, sources, links)
+  $("[src]").each((_, el) => {
+    const $el = $(el);
+    if (el.tagName?.toLowerCase() === "a") return;
+    const src = $el.attr("src");
+    if (src) $el.attr("src", abs(src)!);
+  });
+  $('link[href]').each((_, el) => {
+    const $el = $(el);
+    const href = $el.attr('href');
+    if (href) $el.attr('href', abs(href)!);
+  });
+
+  // Keep navigation inside the Vercel site: rewrite WordPress-domain links to relative
+  $("a[href]").each((_, el) => {
     const $a = $(el);
     const href = $a.attr("href");
     if (!href) return;
-    if (href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("tel:")) return;
     try {
       const u = new URL(href, WP_BASE);
-      if (u.origin === new URL(WP_BASE).origin) {
+      if (u.host === WP_HOST) {
         $a.attr("href", u.pathname + u.search + u.hash);
       }
-    } catch {}
+    } catch {/* ignore */}
   });
 
-  // Collect CSS and JS
-  const styles: string[] = [];
-  $('link[rel="stylesheet"]').each((_i, el) => {
-    const href = $(el).attr("href");
-    if (href) styles.push(href);
+  // Collect HEAD assets
+  const headLinks: LinkAttrs[] = [];
+  $("head link[rel=stylesheet]").each((_, el) => {
+    const attrs: LinkAttrs = {};
+    for (const { name, value } of el.attribs ? Object.entries(el.attribs).map(([name, value]) => ({ name, value })) : []) {
+      if (value != null) attrs[name] = value;
+    }
+    if (attrs.href) headLinks.push(attrs);
   });
 
-  const scripts: string[] = [];
-  $("script[src]").each((_i, el) => {
+  const headStyleTags: string[] = [];
+  $("head style").each((_, el) => headStyleTags.push($(el).html() || ""));
+
+  const headScriptSrcs: string[] = [];
+  const headInlineScripts: string[] = [];
+  $("head script").each((_, el) => {
     const src = $(el).attr("src");
-    if (src) scripts.push(src);
+    if (src) headScriptSrcs.push(abs(src)!);
+    else headInlineScripts.push($(el).html() || "");
+  });
+
+  // Collect BODY assets
+  const bodyScriptSrcs: string[] = [];
+  const bodyInlineScripts: string[] = [];
+  $("body script").each((_, el) => {
+    const src = $(el).attr("src");
+    if (src) bodyScriptSrcs.push(abs(src)!);
+    else bodyInlineScripts.push($(el).html() || "");
   });
 
   return {
-    head: $("head").html() ?? "",
-    bodyClass: $("body").attr("class") ?? "",
-    html: $("body").html() ?? "",
-    styles,
-    scripts,
+    headLinks,
+    headStyleTags,
+    headScriptSrcs,
+    headInlineScripts,
+    bodyHtml: $("body").html() || "",
+    bodyClass: $("body").attr("class") || "",
+    bodyScriptSrcs,
+    bodyInlineScripts,
   };
 }
