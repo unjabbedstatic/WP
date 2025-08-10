@@ -8,19 +8,17 @@ export default function ScriptLoader({ srcs }: { srcs: string[] }) {
     const created: HTMLScriptElement[] = [];
 
     for (const src of srcs) {
-      // Don’t duplicate if already present
+      // avoid duplicates across navigations
       if (document.querySelector(`script[src="${src}"]`)) continue;
       const s = document.createElement("script");
       s.src = src;
-      s.async = false; // preserve order
+      s.async = false; // keep order
       document.body.appendChild(s);
       created.push(s);
     }
 
-    return () => {
-      // Optional: keep scripts mounted between pages; remove if you prefer cleanups
-      // created.forEach((s) => s.remove());
-    };
+    // If you want strict cleanup between route changes, uncomment:
+    // return () => { created.forEach(s => s.remove()); };
   }, [srcs]);
 
   return null;
