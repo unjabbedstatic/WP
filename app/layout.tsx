@@ -12,15 +12,15 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { head, styles } = await fetchRendered("/");
+  const { head, styles, bodyClass } = await fetchRendered("/");
 
   return (
     <html lang="en">
-      <body suppressHydrationWarning>
+      <head dangerouslySetInnerHTML={{ __html: head }} />
+      <body className={bodyClass} suppressHydrationWarning>
         {styles.map((href) => (
           <link key={href} rel="stylesheet" href={href} />
         ))}
-        <div dangerouslySetInnerHTML={{ __html: head }} />
         {children}
       </body>
     </html>
