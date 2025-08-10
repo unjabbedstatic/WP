@@ -1,6 +1,4 @@
-import type { Metadata } from "next";
-
-export const metadata: Metadata = {
+export const metadata = {
   title: "Unjabbed – Static Replica",
   description: "Pixel-perfect pages pulled from WordPress and served statically on Vercel.",
 };
