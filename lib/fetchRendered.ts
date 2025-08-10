@@ -1,50 +1,47 @@
-// lib/fetchRendered.ts
-import { load } from "cheerio";
-
 const WP_BASE = process.env.WP_BASE || "https://unjabbed.app";
+const WP_HOST = new URL(WP_BASE).host;
 
-/**
- * Fetch a fully-rendered WordPress page and return cleaned fragments
- * we can drop into our Next.js layout and pages.
- */
-export default async function fetchRendered(
-  path: string = "/"
-): Promise<{ bodyHtml: string; headHtml: string; bodyClass: string }> {
-  const url = new URL(path, WP_BASE).toString();
+// -------- keep assets absolute to WP --------
+$("[src]").each((_, el) => {
+  const src = $(el).attr("src");
+  if (!src) return;
+  // make assets absolute to WP so they load
+  $(el).attr("src", new URL(src, WP_BASE).toString());
+});
 
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) {
-    throw new Error(`Failed to fetch ${url}: ${res.status} ${res.statusText}`);
+$("link[href]").each((_, el) => {
+  const href = $(el).attr("href");
+  if (!href) return;
+  // keep stylesheets etc. absolute to WP
+  $(el).attr("href", new URL(href, WP_BASE).toString());
+});
+
+// -------- make INTERNAL page links stay on Vercel --------
+$("a[href]").each((_, el) => {
+  const raw = $(el).attr("href");
+  if (!raw) return;
+
+  // Build an absolute URL relative to WP so we can inspect it
+  let abs: URL;
+  try { abs = new URL(raw, WP_BASE); } catch { return; }
+
+  const isInternal =
+    abs.host === WP_HOST && // same site
+    !abs.pathname.match(/\.(pdf|jpg|jpeg|png|gif|webp|svg|zip|mp4|mp3)$/i); // not a file asset
+
+  if (isInternal) {
+    // Repoint to a path on the *current* domain so Next.js handles it
+    const pathOnThisSite = abs.pathname + abs.search + abs.hash;
+    $(el).attr("href", pathOnThisSite);
+  } else {
+    // external link – optional: open in new tab
+    $(el).attr("rel", "noopener");
   }
+});
 
-  const html = await res.text();
-  const $ = load(html);
-
-  // Remove WP admin UI if present
-  $("#wpadminbar, #wp-toolbar").remove();
-
-  // Fix relative links and assets so they still work on Vercel
-  $("a[href]").each((_, el) => {
-    const href = $(el).attr("href");
-    if (!href) return;
-    if (href.startsWith("/")) $(el).attr("href", new URL(href, WP_BASE).toString());
-  });
-
-  $("[src]").each((_, el) => {
-    const src = $(el).attr("src");
-    if (!src) return;
-    if (src.startsWith("/")) $(el).attr("src", new URL(src, WP_BASE).toString());
-  });
-
-  $("link[href]").each((_, el) => {
-    const href = $(el).attr("href");
-    if (!href) return;
-    if (href.startsWith("/")) $(el).attr("href", new URL(href, WP_BASE).toString());
-  });
-
-  const bodyHtml = $("body").html() ?? "";
-  const headHtml = $("head").html() ?? "";
-  const bodyClass = $("body").attr("class") ?? "";
-
-  return { bodyHtml, headHtml, bodyClass };
-}
+// -------- forms should post back to WP --------
+$("form[action]").each((_, el) => {
+  const action = $(el).attr("action");
+  if (!action) return;
+  $(el).attr("action", new URL(action, WP_BASE).toString());
+});
