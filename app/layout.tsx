@@ -1,28 +1,22 @@
 // app/layout.tsx
-import type { Metadata } from "next";
+import type { ReactNode } from "react";
 import fetchRendered from "../lib/fetchRendered";
 
-export const metadata: Metadata = {
-  title: "Unjabbed – Static Replica",
-  description: "Pixel-perfect pages pulled from WordPress and served statically on Vercel.",
-};
+export const dynamic = "force-static";
+export const revalidate = 3600; // rebuild at most once per hour
 
 export default async function RootLayout({
   children,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
-  const { head, styles, bodyClass } = await fetchRendered("/");
+  const { head, bodyClass } = await fetchRendered("/");
 
   return (
     <html lang="en">
+      {/* Inject WP <head> so all CSS/JS/fonts load */}
       <head dangerouslySetInnerHTML={{ __html: head }} />
-      <body className={bodyClass} suppressHydrationWarning>
-        {styles.map((href) => (
-          <link key={href} rel="stylesheet" href={href} />
-        ))}
-        {children}
-      </body>
+      <body className={bodyClass}>{children}</body>
     </html>
   );
 }
