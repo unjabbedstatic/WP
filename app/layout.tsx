@@ -6,13 +6,12 @@ export const dynamic = "force-static";
 export const revalidate = 3600;
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
-  // Use head from home; it carries your theme CSS/JS, fonts, meta, etc.
-  const { headHtml } = await fetchRendered("/");
+  const { headHtml, bodyClass } = await fetchRendered("/");
 
   return (
     <html lang="en">
       <head dangerouslySetInnerHTML={{ __html: headHtml }} />
-      <body>{children}</body>
+      <body className={bodyClass}>{children}</body>
     </html>
   );
 }
