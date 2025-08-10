@@ -1,61 +1,78 @@
 // lib/fetchRendered.ts
-import { load } from "cheerio";
-
-const WP_BASE = process.env.WP_BASE || "https://unjabbed.app";
+import * as cheerio from "cheerio";
 
 /**
  * Fetch a fully-rendered WordPress page and return cleaned HTML.
- * We also move stylesheet <link> and <style> tags from <head> into the top of <body>
- * so the page looks identical when rendered by Next.js.
+ * - Converts all relative asset URLs (css/js/img) to absolute WordPress URLs
+ *   so the browser can load them correctly from your WP origin.
+ * - Rewrites internal <a> links back to app paths so users stay on Vercel.
+ * - Strips the WP admin bar if present.
  */
+const WP_BASE = process.env.WP_BASE || "https://unjabbed.app";
+
 export default async function fetchRendered(pathname: string): Promise<string> {
   const url = new URL(pathname, WP_BASE).toString();
-  const res = await fetch(url, { cache: "no-store" });
+
+  const res = await fetch(url, {
+    // Don’t cache during build so you see updates immediately
+    cache: "no-store",
+    // A friendly UA can sometimes help WP/CDN return full HTML
+    headers: { "User-Agent": "unjs-fetch/1.0 (+vercel)" },
+  });
 
   if (!res.ok) {
     throw new Error(`Failed to fetch ${url}: ${res.status} ${res.statusText}`);
   }
 
   const html = await res.text();
-  const $ = load(html);
+  const $ = cheerio.load(html);
 
-  // Remove WP admin bar if present
+  // Remove admin bar and some non-essential discovery links
   $("#wpadminbar").remove();
+  $('link[rel="https://api.w.org/"]').remove();
 
-  // Build absolute URLs for assets and internal links
-  // href
-  $("[href]").each((_, el) => {
-    const href = $(el).attr("href") || "";
-    // protocol-relative //example.com -> https://example.com
-    if (href.startsWith("//")) $(el).attr("href", `https:${href}`);
-    // site-relative /path -> https://unjabbed.app/path
-    else if (href.startsWith("/")) $(el).attr("href", new URL(href, WP_BASE).toString());
+  // 1) Make all asset URLs absolute to WP (so CSS/JS/IMG actually load)
+  $('link[href], script[src], img[src]').each((_, el) => {
+    const $el = $(el);
+    const attr = $el.is("link, a") ? "href" : "src";
+    const val = $el.attr(attr);
+    if (!val) return;
+
+    // Already absolute? leave it
+    if (/^https?:\/\//i.test(val) || val.startsWith("//")) return;
+
+    // Make absolute against WP_BASE
+    try {
+      const abs = new URL(val, WP_BASE).toString();
+      $el.attr(attr, abs);
+    } catch {
+      /* ignore bad urls */
+    }
   });
 
-  // src
-  $("[src]").each((_, el) => {
-    const src = $(el).attr("src") || "";
-    if (src.startsWith("//")) $(el).attr("src", `https:${src}`);
-    else if (src.startsWith("/")) $(el).attr("src", new URL(src, WP_BASE).toString());
+  // 2) Rewrite internal <a> links to app paths so navigation stays on Vercel
+  $('a[href]').each((_, el) => {
+    const $a = $(el);
+    const href = $a.attr("href");
+    if (!href) return;
+
+    // Skip anchors, mailto, tel, javascript
+    if (/^(mailto:|tel:|javascript:|#)/i.test(href)) return;
+
+    try {
+      const target = new URL(href, WP_BASE);
+      const wpOrigin = new URL(WP_BASE).origin;
+
+      // If link points to the same WP origin, rewrite to just path+query+hash
+      if (target.origin === wpOrigin) {
+        const appPath = `${target.pathname}${target.search}${target.hash}`;
+        $a.attr("href", appPath);
+      }
+    } catch {
+      /* ignore */
+    }
   });
 
-  // Also fix CSS url(...) inside inline <style> tags (common for fonts/images)
-  $("style").each((_, el) => {
-    const css = $(el).html() || "";
-    // url(/path.png)  -> url(https://unjabbed.app/path.png)
-    const patched = css.replace(/url\((['"]?)(\/[^)'"\s]+)\1\)/g, (_m, q, p) => `url(${q}${new URL(p, WP_BASE).toString()}${q})`);
-    $(el).html(patched);
-  });
-
-  // >>> IMPORTANT PART <<<
-  // Collect styles from <head> and inject at the top of <body>
-  const headStyles = $("head link[rel='stylesheet'], head style")
-    .toArray()
-    .map((el) => $.html(el))
-    .join("\n");
-
-  $("body").prepend(headStyles);
-
-  // Return the body HTML (now including the styles)
+  // Return only the body so our Next layout <html>/<body> wraps it cleanly
   return $("body").html() || "";
 }
