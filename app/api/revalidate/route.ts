@@ -3,10 +3,9 @@ import { type NextRequest, NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 
 export async function POST(request: NextRequest) {
-  const authHeader = request.headers.get("authorization");
-  const token = authHeader?.split(" ")[1];
+  const secret = request.nextUrl.searchParams.get("secret");
 
-  if (token !== process.env.REVALIDATION_TOKEN) {
+  if (secret !== process.env.REVALIDATION_TOKEN) {
     return new NextResponse(JSON.stringify({ message: "Unauthorized" }), {
       status: 401,
       headers: { "Content-Type": "application/json" },
