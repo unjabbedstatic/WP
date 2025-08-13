@@ -23,26 +23,22 @@ export default async function fetchRendered(pathname: string): Promise<Rendered>
   });
   if (!res.ok) throw new Error(`Failed to fetch ${url}: ${res.status} ${res.statusText}`);
 
-  let html = await res.text();
+  const html = await res.text();
 
   // Use cheerio to parse and manipulate the HTML
   const $ = cheerio.load(html);
 
-  // Extract <head> and <body>
-  const headHtml = $("head").html() ?? "";
-  let bodyHtml = $("body").html() ?? html;
-  const bodyClass = $("body").attr("class") ?? "";
-
-  const $body = cheerio.load(bodyHtml);
+  // --- Remove the Tidio chat widget ---
+  $('script[src*="code.tidio.co"]').remove();
 
   // --- Make asset paths absolute ---
-  $body("img, script").each((i, el) => {
-    const src = $body(el).attr("src");
+  $("body img, body script").each((i, el) => {
+    const src = $(el).attr("src");
     if (src && src.startsWith("/")) {
-      $body(el).attr("src", `${WP_BASE}${src}`);
+      $(el).attr("src", `${WP_BASE}${src}`);
     }
 
-    const srcset = $body(el).attr("srcset");
+    const srcset = $(el).attr("srcset");
     if (srcset) {
       const newSrcset = srcset
         .split(",")
@@ -54,18 +50,18 @@ export default async function fetchRendered(pathname: string): Promise<Rendered>
           return part;
         })
         .join(", ");
-      $body(el).attr("srcset", newSrcset);
+      $(el).attr("srcset", newSrcset);
     }
   });
 
   // --- Keep navigation inside the Vercel app ---
-  $body("a").each((i, el) => {
-    const href = $body(el).attr("href");
+  $("body a").each((i, el) => {
+    const href = $(el).attr("href");
     if (href) {
       try {
         const linkUrl = new URL(href);
         if (linkUrl.host === WP_HOST) {
-          $body(el).attr("href", linkUrl.pathname);
+          $(el).attr("href", linkUrl.pathname);
         }
       } catch (e) {
         // Not a full URL, so it's a relative path, leave it as is
@@ -73,7 +69,10 @@ export default async function fetchRendered(pathname: string): Promise<Rendered>
     }
   });
 
-  bodyHtml = $body.html();
+  // Extract the final <head> and <body> content
+  const headHtml = $("head").html() ?? "";
+  const bodyHtml = $("body").html() ?? "";
+  const bodyClass = $("body").attr("class") ?? "";
 
   return { headHtml, bodyHtml, bodyClass };
 }
