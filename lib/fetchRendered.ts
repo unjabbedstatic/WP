@@ -1,4 +1,6 @@
 // lib/fetchRendered.ts
+import * as cheerio from "cheerio";
+
 const WP_BASE = process.env.WP_BASE ?? "https://unjabbed.app";
 const WP_HOST = new URL(WP_BASE).host;
 
@@ -23,34 +25,55 @@ export default async function fetchRendered(pathname: string): Promise<Rendered>
 
   let html = await res.text();
 
-  // Extract <head> and <body>
-  const headMatch = html.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
-  const bodyMatch = html.match(/<body([^>]*)>([\s\S]*?)<\/body>/i);
-  const headHtml = headMatch?.[1] ?? "";
-  let bodyHtml = bodyMatch?.[2] ?? html;
+  // Use cheerio to parse and manipulate the HTML
+  const $ = cheerio.load(html);
 
-  // Capture WordPress body classes (themes rely on these)
-  let bodyClass = "";
-  if (bodyMatch?.[1]) {
-    const cls = bodyMatch[1].match(/class=["']([^"']*)["']/i);
-    bodyClass = cls?.[1] ?? "";
-  }
+  // Extract <head> and <body>
+  const headHtml = $("head").html() ?? "";
+  let bodyHtml = $("body").html() ?? html;
+  const bodyClass = $("body").attr("class") ?? "";
+
+  const $body = cheerio.load(bodyHtml);
+
+  // --- Make asset paths absolute ---
+  $body("img, script").each((i, el) => {
+    const src = $body(el).attr("src");
+    if (src && src.startsWith("/")) {
+      $body(el).attr("src", `${WP_BASE}${src}`);
+    }
+
+    const srcset = $body(el).attr("srcset");
+    if (srcset) {
+      const newSrcset = srcset
+        .split(",")
+        .map((part) => {
+          const [url, size] = part.trim().split(" ");
+          if (url.startsWith("/")) {
+            return `${WP_BASE}${url} ${size}`;
+          }
+          return part;
+        })
+        .join(", ");
+      $body(el).attr("srcset", newSrcset);
+    }
+  });
 
   // --- Keep navigation inside the Vercel app ---
-  // Convert <a href="https://unjabbed.app/whatever"> → <a href="/whatever">
-  // Handles http/https and host with/without www
-  const hrefToInternal = new RegExp(
-    String.raw`href=(['"])(?:https?:)?\/\/(?:www\.)?${WP_HOST}(\/[^'"]*)\1`,
-    "gi"
-  );
-  bodyHtml = bodyHtml.replace(hrefToInternal, 'href="$2"');
+  $body("a").each((i, el) => {
+    const href = $body(el).attr("href");
+    if (href) {
+      try {
+        const linkUrl = new URL(href);
+        if (linkUrl.host === WP_HOST) {
+          $body(el).attr("href", linkUrl.pathname);
+        }
+      } catch (e) {
+        // Not a full URL, so it's a relative path, leave it as is
+      }
+    }
+  });
 
-  // Special case: links pointing exactly to the root
-  const rootToSlash = new RegExp(
-    String.raw`href=(['"])(?:https?:)?\/\/(?:www\.)?${WP_HOST}\/?\1`,
-    "gi"
-  );
-  bodyHtml = bodyHtml.replace(rootToSlash, 'href="/"');
+  bodyHtml = $body.html();
 
   return { headHtml, bodyHtml, bodyClass };
 }
